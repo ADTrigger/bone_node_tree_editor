@@ -14,13 +14,35 @@ def bone_node_tree_of(context: Context, name: str = TREE_LABEL) -> bpy.types.Nod
 
 
 def armature_of(context: Context) -> Armature | None:
+    # Blender 4.5 的 Node Editor 上下文里，context.object/selected_objects
+    # 可能拿不到 3D 视图当前激活对象，因此需要多级兜底。
     if context.object is not None and context.object.type == "ARMATURE":
         return context.object.data
+
+    if getattr(context, "active_object", None) is not None and context.active_object.type == "ARMATURE":
+        return context.active_object.data
+
     if context.pose_object is not None and context.pose_object.type == "ARMATURE":
         return context.pose_object.data
+
+    view_layer = getattr(context, "view_layer", None)
+    if view_layer is not None:
+        active_obj = view_layer.objects.active
+        if active_obj is not None and active_obj.type == "ARMATURE":
+            return active_obj.data
+
     for obj in context.selected_objects:
         if obj.type == "ARMATURE":
             return obj.data
+
+    # 个别场景下 selected_objects 为空，再从全局上下文兜底一次
+    global_context = bpy.context
+    if global_context is not None:
+        if global_context.object is not None and global_context.object.type == "ARMATURE":
+            return global_context.object.data
+        if getattr(global_context, "active_object", None) is not None and global_context.active_object.type == "ARMATURE":
+            return global_context.active_object.data
+
     return None
 
 

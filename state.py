@@ -3,6 +3,8 @@ class NodeTreeSnapshot:
         self.active = None
         self.active_select = None
         self.selected = {}
+        self.bone_active = None
+        self.bone_selected = {}
         self.handler = None
         self.region = "HEADER"
 

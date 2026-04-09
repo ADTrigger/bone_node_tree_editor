@@ -1,79 +1,137 @@
 import bpy
 from bpy.types import Context
 
-from .nodes import BoneNodeTree
 from .operators import OT_SyncBoneNodeSelection, OT_UpdateBoneNodeTree
 from .services import armature_of, is_in_bone_node_tree, set_bone_select
 from .state import old_node_tree_snapshot
 
 
+def _collect_node_state(context: Context):
+    active = context.active_node.name if context.active_node else None
+    active_select = context.active_node.select if context.active_node else None
+    selected = {}
+    for node in context.selected_nodes:
+        selected[node.name] = node.select
+    return active, active_select, selected
+
+
+def _collect_bone_state(bones):
+    active = bones.active.name if bones.active else None
+    selected = {}
+    for bone in bones:
+        if bone.select:
+            selected[bone.name] = True
+    return active, selected
+
+
+def _is_state_dict_equal(state_a: dict, state_b: dict) -> bool:
+    if len(state_a) != len(state_b):
+        return False
+    for key, value in state_a.items():
+        if key not in state_b or state_b[key] != value:
+            return False
+    return True
+
+
+def _sync_snapshot_from_node(context: Context):
+    active, active_select, selected = _collect_node_state(context)
+    old_node_tree_snapshot.active = active
+    old_node_tree_snapshot.active_select = active_select
+    old_node_tree_snapshot.selected = selected
+
+
+def _sync_snapshot_from_bone(bones):
+    active, selected = _collect_bone_state(bones)
+    old_node_tree_snapshot.bone_active = active
+    old_node_tree_snapshot.bone_selected = selected
+
+
+def _sync_node_to_bone(context: Context, bones):
+    for bone in bones:
+        set_bone_select(bone, False)
+
+    for node in context.selected_nodes:
+        bone = bones.get(node.name)
+        if bone:
+            set_bone_select(bone, node.select)
+
+    if context.active_node:
+        bone = bones.get(context.active_node.name)
+        if bone and context.active_node.select:
+            bones.active = bone
+            set_bone_select(bone, True)
+            if context.mode == "PAINT_WEIGHT":
+                if context.object.vertex_groups.get(bone.name):
+                    bpy.ops.object.vertex_group_set_active(group=bone.name)
+                else:
+                    context.object.vertex_groups.active_index = -1
+        else:
+            bones.active = None
+    else:
+        bones.active = None
+
+    _sync_snapshot_from_node(context)
+    _sync_snapshot_from_bone(bones)
+
+
+def _sync_bone_to_node(context: Context, bones):
+    node_tree = context.space_data.edit_tree if context.space_data else None
+    if node_tree is None:
+        return
+
+    nodes = node_tree.nodes
+    bone_active, bone_selected = _collect_bone_state(bones)
+
+    for node in nodes:
+        node.select = False
+
+    for bone_name in bone_selected:
+        node = nodes.get(bone_name)
+        if node:
+            node.select = True
+
+    if bone_active:
+        nodes.active = nodes.get(bone_active)
+    else:
+        nodes.active = None
+
+    _sync_snapshot_from_bone(bones)
+    _sync_snapshot_from_node(context)
+
+
 def _space_node_editor_draw():
-    is_dirty = False
     context = bpy.context
 
     if not is_in_bone_node_tree(context):
         return
 
-    if context.active_node and not context.active_node.hide:
-        context.active_node.hide = True
+    armature = armature_of(context)
+    if armature is None:
+        return
 
-    if context.active_node is None:
-        if old_node_tree_snapshot.active is not None:
-            is_dirty = True
-    elif old_node_tree_snapshot.active is None:
-        if context.active_node is not None:
-            is_dirty = True
-    elif old_node_tree_snapshot.active != context.active_node.name:
-        is_dirty = True
-    elif context.active_node == old_node_tree_snapshot.active:
-        is_dirty = context.active_node.select != old_node_tree_snapshot.active_select
+    bones = armature.edit_bones if context.mode == "EDIT_ARMATURE" else armature.bones
 
-    if not is_dirty:
-        match_num = 0
-        for sel_node in context.selected_nodes:
-            if sel_node.name in old_node_tree_snapshot.selected:
-                match_num += 1
-            else:
-                is_dirty = True
-                break
-        if match_num != len(old_node_tree_snapshot.selected):
-            is_dirty = True
+    node_active, node_active_select, node_selected = _collect_node_state(context)
+    bone_active, bone_selected = _collect_bone_state(bones)
 
-    if is_dirty:
-        armature = armature_of(context)
-        if armature is not None:
-            if context.mode == "EDIT_ARMATURE":
-                bones = armature.edit_bones
-            else:
-                bones = armature.bones
+    node_changed = (
+        old_node_tree_snapshot.active != node_active
+        or old_node_tree_snapshot.active_select != node_active_select
+        or not _is_state_dict_equal(old_node_tree_snapshot.selected, node_selected)
+    )
+    bone_changed = (
+        old_node_tree_snapshot.bone_active != bone_active
+        or not _is_state_dict_equal(old_node_tree_snapshot.bone_selected, bone_selected)
+    )
 
-            for bone in bones:
-                set_bone_select(bone, False)
+    if not node_changed and not bone_changed:
+        return
 
-            old_node_tree_snapshot.selected.clear()
-            for node in context.selected_nodes:
-                old_node_tree_snapshot.selected[node.name] = node.select
-                bone = bones.get(node.name)
-                if bone:
-                    set_bone_select(bone, node.select)
+    if bone_changed and not node_changed:
+        _sync_bone_to_node(context, bones)
+        return
 
-            if context.active_node:
-                bone = bones.get(context.active_node.name)
-                if bone and context.active_node.select:
-                    bones.active = bone
-                    set_bone_select(bone, True)
-                    old_node_tree_snapshot.active_select = True
-                    if context.mode == "PAINT_WEIGHT":
-                        if context.object.vertex_groups.get(bone.name):
-                            bpy.ops.object.vertex_group_set_active(group=bone.name)
-                        else:
-                            context.object.vertex_groups.active_index = -1
-                else:
-                    old_node_tree_snapshot.active_select = False
-                old_node_tree_snapshot.active = context.active_node.name
-            else:
-                bones.active = None
-                old_node_tree_snapshot.active = None
+    _sync_node_to_bone(context, bones)
 
 
 def _draw_pie(this: bpy.types.Menu, context: Context):

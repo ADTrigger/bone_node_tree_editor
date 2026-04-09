@@ -53,13 +53,13 @@ class OT_UpdateBoneNodeTree(Operator):
 
     def execute(self, context):
         node_tree = bone_node_tree_of(context)
-        nodes = node_tree.nodes
-        nodes.clear()
-
         armature = armature_of(context)
         if armature is None:
             self.report({"INFO"}, "没有选中骨架")
             return {"CANCELLED"}
+
+        nodes = node_tree.nodes
+        nodes.clear()
 
         set_node_edit_lock(True)
 
@@ -74,6 +74,7 @@ class OT_UpdateBoneNodeTree(Operator):
             node.width = len(node.name) * 8
             node.select = bone.select
             node.has_parent = bone.parent is not None
+            node.is_connected_parent = bool(bone.parent and getattr(bone, "use_connect", False))
             sync_bone_color_to_node(bone.color, node)
             if bones.active == bone:
                 nodes.active = node
@@ -85,9 +86,14 @@ class OT_UpdateBoneNodeTree(Operator):
             if bone.parent:
                 parent_node = nodes.get(bone.parent.name)
                 if parent_node:
+                    parent_input_socket = (
+                        BoneNode.CONNECTED_PARENT_SOCKET_NAME
+                        if getattr(bone, "use_connect", False)
+                        else BoneNode.PARENT_SOCKET_NAME
+                    )
                     node_tree.links.new(
-                        parent_node.outputs["Child Of"],
-                        node.inputs["parent"],
+                        parent_node.outputs[BoneNode.CHILD_SOCKET_NAME],
+                        node.inputs[parent_input_socket],
                     )
             else:
                 root_bones.append(bone)
