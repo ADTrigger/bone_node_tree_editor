@@ -11,13 +11,44 @@ from .constants import (
     BONE_NODE_ICON,
 )
 from .services import armature_of, bone_node_tree_of
-from .state import is_node_edit_locked
+from .state import is_node_edit_locked, set_node_edit_lock
 
 
 class BoneNodeTree(NodeTree):
     bl_idname = TREE_IDNAME
     bl_label = TREE_LABEL
     bl_icon = TREE_ICON
+
+    def update(self):
+        # 在 Blender 4.x 中，节点连线变更由 NodeTree.update 统一处理更稳定
+        if is_node_edit_locked():
+            return
+
+        context = bpy.context
+        if context.mode != "EDIT_ARMATURE":
+            return
+
+        armature = armature_of(context)
+        if armature is None:
+            return
+
+        set_node_edit_lock(True)
+        try:
+            for node in self.nodes:
+                if not isinstance(node, BoneNode):
+                    continue
+
+                parent = None
+                parent_input = node.inputs.get("parent")
+                if parent_input and parent_input.is_linked and parent_input.links:
+                    link = parent_input.links[0]
+                    if link.from_node and link.from_node != node:
+                        parent = link.from_node.name
+
+                if node._set_bone_parent(parent):
+                    node.has_parent = parent is not None
+        finally:
+            set_node_edit_lock(False)
 
 
 class BoneNode(Node):
@@ -62,6 +93,15 @@ class BoneNode(Node):
                 if parent:
                     bone_parent = armature.edit_bones.get(parent)
                 if bone:
+                    if bone_parent == bone:
+                        return False
+
+                    ancestor = bone_parent
+                    while ancestor:
+                        if ancestor == bone:
+                            return False
+                        ancestor = ancestor.parent
+
                     bone.parent = bone_parent
                     return True
         return False
