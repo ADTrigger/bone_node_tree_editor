@@ -1,21 +1,18 @@
 import bpy
-from bpy.types import Context, Armature, Node
+from bpy.types import Armature, Context, Node
 
-from .constants import BONE_PALETTE_TO_INDEX_MAP, TREE_IDNAME, TREE_LABEL
+from .binding import ensure_bound_tree
+from .constants import BONE_PALETTE_TO_INDEX_MAP, TREE_IDNAME
 
 
-def bone_node_tree_of(context: Context, name: str = TREE_LABEL) -> bpy.types.NodeTree:
-    node_groups = bpy.data.node_groups
-    for node_group_name in node_groups:
-        if node_group_name.name == name:
-            return node_groups[name]
-
-    return node_groups.new(name, TREE_IDNAME)
+def bone_node_tree_of(context: Context) -> bpy.types.NodeTree | None:
+    armature = armature_of(context)
+    if armature is None:
+        return None
+    return ensure_bound_tree(armature)
 
 
 def armature_of(context: Context) -> Armature | None:
-    # Blender 4.5 的 Node Editor 上下文里，context.object/selected_objects
-    # 可能拿不到 3D 视图当前激活对象，因此需要多级兜底。
     if context.object is not None and context.object.type == "ARMATURE":
         return context.object.data
 
@@ -35,7 +32,6 @@ def armature_of(context: Context) -> Armature | None:
         if obj.type == "ARMATURE":
             return obj.data
 
-    # 个别场景下 selected_objects 为空，再从全局上下文兜底一次
     global_context = bpy.context
     if global_context is not None:
         if global_context.object is not None and global_context.object.type == "ARMATURE":
@@ -51,7 +47,7 @@ def sync_bone_color_to_node(bone_color: bpy.types.BoneColor, node: Node):
         node.color = bone_color.custom.normal
         node.use_custom_color = True
     else:
-        index = BONE_PALETTE_TO_INDEX_MAP[bone_color.palette]
+        index = BONE_PALETTE_TO_INDEX_MAP.get(bone_color.palette)
         theme = bpy.context.preferences.themes[0]
         if index is not None:
             color_set = theme.bone_color_sets[index]

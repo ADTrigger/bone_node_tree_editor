@@ -1,6 +1,7 @@
 TREE_IDNAME = "bnte.BoneNodeTreeEditor"
 TREE_LABEL = "Good to the bone"
 TREE_ICON = "BONE_DATA"
+EDITOR_SYNC_INTERVAL = 0.2
 
 BONE_NODE_IDNAME = "bnte.BoneNode"
 BONE_NODE_LABEL = "Bone"
@@ -26,7 +27,7 @@ BONE_PALETTE_TO_INDEX_MAP = {
     "THEME16": 15,
     "THEME17": 16,
     "THEME18": 17,
-    "THEME19": 17,
+    "THEME19": 18,
     "THEME20": 19,
     "CUSTOM": None,
 }

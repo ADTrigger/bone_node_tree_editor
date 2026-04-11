@@ -1,137 +1,83 @@
 import bpy
 from bpy.types import Context
 
+from .binding import ensure_bound_tree, get_bound_tree
+from .constants import EDITOR_SYNC_INTERVAL
 from .operators import OT_SyncBoneNodeSelection, OT_UpdateBoneNodeTree
-from .services import armature_of, is_in_bone_node_tree, set_bone_select
-from .state import old_node_tree_snapshot
+from .services import armature_of, is_in_bone_node_tree
+from .state import is_ui_hooks_registered, set_ui_hooks_registered
+from .sync import sync_selection_state
 
 
-def _collect_node_state(context: Context):
-    active = context.active_node.name if context.active_node else None
-    active_select = context.active_node.select if context.active_node else None
-    selected = {}
-    for node in context.selected_nodes:
-        selected[node.name] = node.select
-    return active, active_select, selected
-
-
-def _collect_bone_state(bones):
-    active = bones.active.name if bones.active else None
-    selected = {}
-    for bone in bones:
-        if bone.select:
-            selected[bone.name] = True
-    return active, selected
-
-
-def _is_state_dict_equal(state_a: dict, state_b: dict) -> bool:
-    if len(state_a) != len(state_b):
-        return False
-    for key, value in state_a.items():
-        if key not in state_b or state_b[key] != value:
-            return False
-    return True
-
-
-def _sync_snapshot_from_node(context: Context):
-    active, active_select, selected = _collect_node_state(context)
-    old_node_tree_snapshot.active = active
-    old_node_tree_snapshot.active_select = active_select
-    old_node_tree_snapshot.selected = selected
-
-
-def _sync_snapshot_from_bone(bones):
-    active, selected = _collect_bone_state(bones)
-    old_node_tree_snapshot.bone_active = active
-    old_node_tree_snapshot.bone_selected = selected
-
-
-def _sync_node_to_bone(context: Context, bones):
-    for bone in bones:
-        set_bone_select(bone, False)
-
-    for node in context.selected_nodes:
-        bone = bones.get(node.name)
-        if bone:
-            set_bone_select(bone, node.select)
-
-    if context.active_node:
-        bone = bones.get(context.active_node.name)
-        if bone and context.active_node.select:
-            bones.active = bone
-            set_bone_select(bone, True)
-            if context.mode == "PAINT_WEIGHT":
-                if context.object.vertex_groups.get(bone.name):
-                    bpy.ops.object.vertex_group_set_active(group=bone.name)
-                else:
-                    context.object.vertex_groups.active_index = -1
-        else:
-            bones.active = None
-    else:
-        bones.active = None
-
-    _sync_snapshot_from_node(context)
-    _sync_snapshot_from_bone(bones)
-
-
-def _sync_bone_to_node(context: Context, bones):
-    node_tree = context.space_data.edit_tree if context.space_data else None
-    if node_tree is None:
+def _iter_node_editor_overrides():
+    window_manager = getattr(bpy.context, "window_manager", None)
+    if window_manager is None:
         return
 
-    nodes = node_tree.nodes
-    bone_active, bone_selected = _collect_bone_state(bones)
+    for window in window_manager.windows:
+        screen = getattr(window, "screen", None)
+        if screen is None:
+            continue
 
-    for node in nodes:
-        node.select = False
+        for area in screen.areas:
+            if area.type != "NODE_EDITOR":
+                continue
 
-    for bone_name in bone_selected:
-        node = nodes.get(bone_name)
-        if node:
-            node.select = True
+            space = area.spaces.active
+            if space is None or space.type != "NODE_EDITOR":
+                continue
 
-    if bone_active:
-        nodes.active = nodes.get(bone_active)
-    else:
-        nodes.active = None
+            region = next((region for region in area.regions if region.type == "WINDOW"), None)
+            if region is None:
+                continue
 
-    _sync_snapshot_from_bone(bones)
-    _sync_snapshot_from_node(context)
+            yield window, area, region, space
 
 
-def _space_node_editor_draw():
-    context = bpy.context
+def _active_editor_tree_for_armature(context: Context, armature):
+    space = context.space_data
+    if space is None or space.type != "NODE_EDITOR":
+        return None
 
-    if not is_in_bone_node_tree(context):
-        return
+    bound_tree = get_bound_tree(armature)
+    current_tree = getattr(space, "edit_tree", None)
 
-    armature = armature_of(context)
-    if armature is None:
-        return
+    # Respect pinned editors so we do not override intentionally fixed tree views.
+    if getattr(space, "pin", False):
+        if bound_tree is None or current_tree != bound_tree:
+            return None
+        return bound_tree
 
-    bones = armature.edit_bones if context.mode == "EDIT_ARMATURE" else armature.bones
+    if bound_tree is None:
+        bound_tree = ensure_bound_tree(armature)
 
-    node_active, node_active_select, node_selected = _collect_node_state(context)
-    bone_active, bone_selected = _collect_bone_state(bones)
+    if current_tree != bound_tree:
+        space.node_tree = bound_tree
 
-    node_changed = (
-        old_node_tree_snapshot.active != node_active
-        or old_node_tree_snapshot.active_select != node_active_select
-        or not _is_state_dict_equal(old_node_tree_snapshot.selected, node_selected)
-    )
-    bone_changed = (
-        old_node_tree_snapshot.bone_active != bone_active
-        or not _is_state_dict_equal(old_node_tree_snapshot.bone_selected, bone_selected)
-    )
+    return bound_tree
 
-    if not node_changed and not bone_changed:
-        return
 
-    if bone_changed and not node_changed:
-        _sync_bone_to_node(context, bones)
-        return
+def _poll_active_editor_selection_sync():
+    if not is_ui_hooks_registered():
+        return None
 
-    _sync_node_to_bone(context, bones)
+    for window, area, region, space in _iter_node_editor_overrides():
+        with bpy.context.temp_override(window=window, area=area, region=region, space_data=space):
+            context = bpy.context
+            if not is_in_bone_node_tree(context):
+                continue
+
+            armature = armature_of(context)
+            if armature is None:
+                continue
+
+            node_tree = _active_editor_tree_for_armature(context, armature)
+            if node_tree is None:
+                continue
+
+            sync_selection_state(context, armature, node_tree)
+
+    return EDITOR_SYNC_INTERVAL
 
 
 def _draw_pie(this: bpy.types.Menu, context: Context):
@@ -141,19 +87,31 @@ def _draw_pie(this: bpy.types.Menu, context: Context):
         pie.operator(OT_UpdateBoneNodeTree.bl_idname, icon="OUTLINER_DATA_ARMATURE")
 
 
+def _draw_header_status(this, context: Context):
+    if not is_in_bone_node_tree(context):
+        return
+
+    if context.mode == "OBJECT":
+        this.layout.label(text="Object 模式下节点图已锁定", icon="LOCKED")
+
+
 def register_ui_hooks():
-    old_node_tree_snapshot.handler = bpy.types.SpaceNodeEditor.draw_handler_add(
-        _space_node_editor_draw,
-        (),
-        old_node_tree_snapshot.region,
-        "POST_PIXEL",
-    )
+    if is_ui_hooks_registered():
+        return
+
+    set_ui_hooks_registered(True)
     bpy.types.NODE_MT_view_pie.append(_draw_pie)
+    bpy.types.NODE_HT_header.append(_draw_header_status)
+    if not bpy.app.timers.is_registered(_poll_active_editor_selection_sync):
+        bpy.app.timers.register(_poll_active_editor_selection_sync, first_interval=0.0)
 
 
 def unregister_ui_hooks():
+    if not is_ui_hooks_registered():
+        return
+
+    set_ui_hooks_registered(False)
     bpy.types.NODE_MT_view_pie.remove(_draw_pie)
-    bpy.types.SpaceNodeEditor.draw_handler_remove(
-        old_node_tree_snapshot.handler,
-        old_node_tree_snapshot.region,
-    )
+    bpy.types.NODE_HT_header.remove(_draw_header_status)
+    if bpy.app.timers.is_registered(_poll_active_editor_selection_sync):
+        bpy.app.timers.unregister(_poll_active_editor_selection_sync)
