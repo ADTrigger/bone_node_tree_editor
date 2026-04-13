@@ -2,6 +2,7 @@ import bpy
 from bpy.types import Armature, NodeTree
 
 from .constants import TREE_IDNAME
+from .session import clear_tree_session, mark_tree_dirty
 
 
 ARMATURE_TREE_NAME_KEY = "bnte_node_tree_name"
@@ -39,8 +40,15 @@ def is_tree_bound_to_armature(armature: Armature | None, node_tree: NodeTree | N
 
 
 def bind_tree_to_armature(armature: Armature, node_tree: NodeTree) -> NodeTree:
+    previous_tree_name = armature.get(ARMATURE_TREE_NAME_KEY)
+    if previous_tree_name and previous_tree_name != node_tree.name:
+        previous_tree = bpy.data.node_groups.get(previous_tree_name)
+        if previous_tree is not None and previous_tree != node_tree:
+            clear_tree_session(previous_tree)
+
     armature[ARMATURE_TREE_NAME_KEY] = node_tree.name
     node_tree[TREE_ARMATURE_NAME_KEY] = armature.name
+    mark_tree_dirty(node_tree, "binding", "topology", "selection")
     return node_tree
 
 

@@ -1,6 +1,7 @@
 import bpy
 from bpy.types import Armature, Context, Node
 
+from .blender_context import active_theme, fallback_context
 from .binding import ensure_bound_tree
 from .constants import BONE_PALETTE_TO_INDEX_MAP, TREE_IDNAME
 
@@ -32,7 +33,7 @@ def armature_of(context: Context) -> Armature | None:
         if obj.type == "ARMATURE":
             return obj.data
 
-    global_context = bpy.context
+    global_context = fallback_context()
     if global_context is not None:
         if global_context.object is not None and global_context.object.type == "ARMATURE":
             return global_context.object.data
@@ -48,7 +49,10 @@ def sync_bone_color_to_node(bone_color: bpy.types.BoneColor, node: Node):
         node.use_custom_color = True
     else:
         index = BONE_PALETTE_TO_INDEX_MAP.get(bone_color.palette)
-        theme = bpy.context.preferences.themes[0]
+        theme = active_theme()
+        if theme is None:
+            node.use_custom_color = False
+            return
         if index is not None:
             color_set = theme.bone_color_sets[index]
             if color_set:

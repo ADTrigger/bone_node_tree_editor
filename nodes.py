@@ -2,6 +2,7 @@ import bpy
 from bpy.props import BoolProperty
 from bpy.types import Node, NodeTree
 
+from .blender_context import current_context, is_edit_armature_mode, is_object_mode, mode_of
 from .binding import get_bound_armature
 from .constants import (
     BONE_NODE_ICON,
@@ -11,12 +12,9 @@ from .constants import (
     TREE_IDNAME,
     TREE_LABEL,
 )
-from .state import is_node_edit_locked
-from .sync import (
-    apply_node_parent_link_edit,
-    capture_node_layout_snapshot,
-    restore_locked_tree_layout,
-)
+from .layout_controller import capture_node_layout_snapshot, restore_locked_tree_layout
+from .session import is_tree_mutating
+from .sync_controller import apply_node_parent_edit
 
 
 class BoneNodeTree(NodeTree):
@@ -25,10 +23,10 @@ class BoneNodeTree(NodeTree):
     bl_icon = TREE_ICON
 
     def update(self):
-        if is_node_edit_locked():
+        if is_tree_mutating(self):
             return
 
-        mode = getattr(bpy.context, "mode", None)
+        mode = mode_of()
         if mode == "OBJECT":
             restore_locked_tree_layout(self)
         return
@@ -58,22 +56,28 @@ class BoneNode(Node):
 
     @classmethod
     def poll(self, node_tree):
-        del node_tree
-        return is_node_edit_locked()
+        return is_tree_mutating(node_tree)
 
     def insert_link(self, link: bpy.types.NodeLink):
-        if is_node_edit_locked():
+        node_tree = self.id_data
+        if is_tree_mutating(node_tree):
             return
 
-        node_tree = self.id_data
         armature = get_bound_armature(node_tree)
         if armature is None:
             return
 
-        if bpy.context.mode != "EDIT_ARMATURE":
+        context = current_context()
+        if not is_edit_armature_mode(context):
             link.is_muted = True
             if link.to_node == self:
-                apply_node_parent_link_edit(bpy.context, armature, node_tree, self)
+                apply_node_parent_edit(
+                    context,
+                    armature,
+                    node_tree,
+                    self,
+                    origin="node_insert_link_restore",
+                )
             return
 
         if link.to_node != self:
@@ -85,36 +89,39 @@ class BoneNode(Node):
         }:
             return
 
-        apply_node_parent_link_edit(
-            bpy.context,
+        apply_node_parent_edit(
+            context,
             armature,
             node_tree,
             self,
             preferred_socket_name=link.to_socket.name,
+            origin="node_insert_link",
         )
 
     def update(self):
-        if is_node_edit_locked():
+        node_tree = self.id_data
+        if is_tree_mutating(node_tree):
             return
 
-        node_tree = self.id_data
         armature = get_bound_armature(node_tree)
         if armature is None:
             return
 
+        context = current_context()
         preferred_socket_name = None
         if self.inputs[self.CONNECTED_PARENT_SOCKET_NAME].is_linked:
             preferred_socket_name = self.CONNECTED_PARENT_SOCKET_NAME
         elif self.inputs[self.PARENT_SOCKET_NAME].is_linked:
             preferred_socket_name = self.PARENT_SOCKET_NAME
 
-        apply_node_parent_link_edit(
-            bpy.context,
+        apply_node_parent_edit(
+            context,
             armature,
             node_tree,
             self,
             preferred_socket_name=preferred_socket_name,
+            origin="node_update",
         )
 
-        if bpy.context.mode != "OBJECT":
+        if not is_object_mode(context):
             capture_node_layout_snapshot(node_tree, self)
