@@ -3,17 +3,9 @@ from __future__ import annotations
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from time import monotonic
+from uuid import uuid4
 
-
-@dataclass
-class TreeSyncSnapshot:
-    active: str | None = None
-    active_select: bool | None = None
-    selected: set[str] = field(default_factory=set)
-    bone_active: str | None = None
-    bone_selected: set[str] = field(default_factory=set)
-    topology_signature: frozenset = field(default_factory=frozenset)
-    node_layout: dict[str, tuple[tuple[float, float], float]] = field(default_factory=dict)
+from .snapshots import TreeSyncSnapshot
 
 
 @dataclass
@@ -57,19 +49,77 @@ class TreeSession:
         self.next_selection_sync_at = now + interval
 
 
-_tree_sessions: dict[int, TreeSession] = {}
+TREE_SESSION_RUNTIME_KEY = "bnte_runtime_session_key"
+
+_tree_sessions: dict[str, TreeSession] = {}
+_tree_pointers_by_session_key: dict[str, int] = {}
 
 
-def _session_key_for_tree(node_tree) -> int:
+def _new_tree_session_key() -> str:
+    return uuid4().hex
+
+
+def _tree_pointer(node_tree) -> int:
     return int(node_tree.as_pointer())
 
 
+def _stored_session_key_for_tree(node_tree) -> str | None:
+    session_key = node_tree.get(TREE_SESSION_RUNTIME_KEY)
+    if isinstance(session_key, str) and session_key:
+        return session_key
+    return None
+
+
+def _ensure_session_key_for_tree(node_tree) -> str:
+    pointer = _tree_pointer(node_tree)
+    session_key = _stored_session_key_for_tree(node_tree)
+    if session_key is None:
+        session_key = _new_tree_session_key()
+        node_tree[TREE_SESSION_RUNTIME_KEY] = session_key
+
+    # Duplicated node trees inherit custom properties, so a copied runtime
+    # session key must be replaced before it can alias another tree session.
+    owner_pointer = _tree_pointers_by_session_key.get(session_key)
+    if owner_pointer is not None and owner_pointer != pointer:
+        session_key = _new_tree_session_key()
+        node_tree[TREE_SESSION_RUNTIME_KEY] = session_key
+
+    _tree_pointers_by_session_key[session_key] = pointer
+    return session_key
+
+
+def prune_tree_sessions():
+    import bpy
+
+    live_session_keys: set[str] = set()
+    live_pointers_by_key: dict[str, int] = {}
+
+    for node_tree in bpy.data.node_groups:
+        session_key = _stored_session_key_for_tree(node_tree)
+        if session_key is None:
+            continue
+        live_session_keys.add(session_key)
+        live_pointers_by_key[session_key] = _tree_pointer(node_tree)
+
+    stale_session_keys = [key for key in _tree_sessions if key not in live_session_keys]
+    for session_key in stale_session_keys:
+        _tree_sessions.pop(session_key, None)
+
+    stale_pointer_keys = [
+        key for key in _tree_pointers_by_session_key if key not in live_session_keys
+    ]
+    for session_key in stale_pointer_keys:
+        _tree_pointers_by_session_key.pop(session_key, None)
+
+    _tree_pointers_by_session_key.update(live_pointers_by_key)
+
+
 def session_for_tree(node_tree) -> TreeSession:
-    key = _session_key_for_tree(node_tree)
-    session = _tree_sessions.get(key)
+    session_key = _ensure_session_key_for_tree(node_tree)
+    session = _tree_sessions.get(session_key)
     if session is None:
         session = TreeSession()
-        _tree_sessions[key] = session
+        _tree_sessions[session_key] = session
     return session
 
 
@@ -109,8 +159,13 @@ def tree_mutation(node_tree, *, origin: str | None = None):
 def clear_tree_session(node_tree):
     if node_tree is None:
         return
-    _tree_sessions.pop(_session_key_for_tree(node_tree), None)
+    session_key = _stored_session_key_for_tree(node_tree)
+    if session_key is None:
+        return
+    _tree_sessions.pop(session_key, None)
+    _tree_pointers_by_session_key.pop(session_key, None)
 
 
 def clear_all_tree_sessions():
     _tree_sessions.clear()
+    _tree_pointers_by_session_key.clear()

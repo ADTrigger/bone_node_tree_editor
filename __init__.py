@@ -13,7 +13,9 @@ bl_info = {
 
 import bpy
 
+from .binding import clear_binding_runtime_state
 from .event_bridge import register_event_hooks, unregister_event_hooks
+from .migration import migrate_all_data
 from .nodes import BoneNodeTree, BoneNode
 from .operators import OT_UpdateBoneNodeTree, OT_SyncBoneNodeSelection
 from .session import clear_all_tree_sessions
@@ -32,6 +34,7 @@ def register():
     clear_all_tree_sessions()
     for cls in classes:
         bpy.utils.register_class(cls)
+    migrate_all_data()
     register_event_hooks()
     register_ui_hooks()
 
@@ -40,5 +43,6 @@ def unregister():
     unregister_ui_hooks()
     unregister_event_hooks()
     clear_all_tree_sessions()
+    clear_binding_runtime_state()
     for cls in reversed(classes):
         bpy.utils.unregister_class(cls)

@@ -1,15 +1,17 @@
 from bpy.types import Context
 
 from .blender_context import set_active_vertex_group_by_name
+from .diff import diff_selection_state
 from .services import set_bone_select
 from .session import snapshot_for_tree
-from .sync_common import (
-    bone_collection_for_context,
-    collect_bone_state,
-    collect_node_state,
-    collect_topology_signature,
+from .snapshots import (
+    BoneSelectionSnapshot,
+    collect_bone_selection_snapshot,
+    collect_node_selection_snapshot,
+    collect_topology_snapshot,
     sync_snapshot,
 )
+from .sync_common import bone_collection_for_context
 
 
 def _sync_active_weight_group(context: Context, active_bone_name: str | None):
@@ -27,17 +29,19 @@ def sync_node_selection_to_bone(
     node_state=None,
     bone_state=None,
     snapshot=None,
-    topology_signature=None,
+    topology_snapshot=None,
 ):
     if snapshot is None:
         snapshot = snapshot_for_tree(node_tree)
     if node_state is None:
-        node_state = collect_node_state(node_tree)
+        node_state = collect_node_selection_snapshot(node_tree)
     if bone_state is None:
-        bone_state = collect_bone_state(bones)
+        bone_state = collect_bone_selection_snapshot(bones)
 
-    node_active, node_active_select, node_selected = node_state
-    _, bone_selected = bone_state
+    node_active = node_state.active
+    node_active_select = node_state.active_select
+    node_selected = set(node_state.selected)
+    bone_selected = set(bone_state.selected)
 
     valid_selected_bones = {bone_name for bone_name in node_selected if bones.get(bone_name) is not None}
 
@@ -65,9 +69,12 @@ def sync_node_selection_to_bone(
     _sync_active_weight_group(context, active_bone_name)
     sync_snapshot(
         snapshot,
-        node_state=node_state,
-        bone_state=(active_bone_name, valid_selected_bones),
-        topology_signature=topology_signature,
+        node_selection=node_state,
+        bone_selection=BoneSelectionSnapshot(
+            active=active_bone_name,
+            selected=frozenset(valid_selected_bones),
+        ),
+        topology=topology_snapshot,
     )
 
 
@@ -78,19 +85,21 @@ def sync_bone_selection_to_node(
     node_state=None,
     bone_state=None,
     snapshot=None,
-    topology_signature=None,
+    topology_snapshot=None,
 ):
     if snapshot is None:
         snapshot = snapshot_for_tree(node_tree)
 
     nodes = node_tree.nodes
     if bone_state is None:
-        bone_state = collect_bone_state(bones)
+        bone_state = collect_bone_selection_snapshot(bones)
     if node_state is None:
-        node_state = collect_node_state(node_tree)
+        node_state = collect_node_selection_snapshot(node_tree)
 
-    bone_active, bone_selected = bone_state
-    node_active, _, node_selected = node_state
+    bone_active = bone_state.active
+    bone_selected = set(bone_state.selected)
+    node_active = node_state.active
+    node_selected = set(node_state.selected)
 
     valid_selected_nodes = {node_name for node_name in bone_selected if nodes.get(node_name) is not None}
 
@@ -108,13 +117,11 @@ def sync_bone_selection_to_node(
     if node_active != (active_node.name if active_node else None):
         nodes.active = active_node
 
-    active_node_name = active_node.name if active_node else None
-    active_node_select = bool(active_node and active_node.select)
     sync_snapshot(
         snapshot,
-        node_state=(active_node_name, active_node_select, valid_selected_nodes),
-        bone_state=bone_state,
-        topology_signature=topology_signature,
+        node_selection=collect_node_selection_snapshot(node_tree),
+        bone_selection=bone_state,
+        topology=topology_snapshot,
     )
 
 
@@ -125,43 +132,37 @@ def sync_selection_state(
     *,
     bones=None,
     snapshot=None,
-    topology_signature=None,
+    topology_snapshot=None,
 ):
     if bones is None:
         bones = bone_collection_for_context(context, armature)
     if snapshot is None:
         snapshot = snapshot_for_tree(node_tree)
-    if topology_signature is None:
-        topology_signature = collect_topology_signature(bones)
+    if topology_snapshot is None:
+        topology_snapshot = collect_topology_snapshot(bones)
 
-    node_state = collect_node_state(node_tree)
-    bone_state = collect_bone_state(bones)
-    node_active, node_active_select, node_selected = node_state
-    bone_active, bone_selected = bone_state
-
-    node_changed = (
-        snapshot.active != node_active
-        or snapshot.active_select != node_active_select
-        or snapshot.selected != node_selected
-    )
-    bone_changed = (
-        snapshot.bone_active != bone_active
-        or snapshot.bone_selected != bone_selected
+    node_state = collect_node_selection_snapshot(node_tree)
+    bone_state = collect_bone_selection_snapshot(bones)
+    selection_diff = diff_selection_state(
+        snapshot,
+        node_selection=node_state,
+        bone_selection=bone_state,
+        topology=topology_snapshot,
     )
 
-    if not node_changed and not bone_changed:
-        if snapshot.topology_signature != topology_signature:
-            sync_snapshot(snapshot, topology_signature=topology_signature)
+    if not selection_diff.has_changes:
+        if selection_diff.topology_changed:
+            sync_snapshot(snapshot, topology=topology_snapshot)
         return
 
-    if bone_changed and not node_changed:
+    if selection_diff.should_sync_bone_to_node:
         sync_bone_selection_to_node(
             bones,
             node_tree,
             node_state=node_state,
             bone_state=bone_state,
             snapshot=snapshot,
-            topology_signature=topology_signature,
+            topology_snapshot=topology_snapshot,
         )
         return
 
@@ -172,5 +173,5 @@ def sync_selection_state(
         node_state=node_state,
         bone_state=bone_state,
         snapshot=snapshot,
-        topology_signature=topology_signature,
+        topology_snapshot=topology_snapshot,
     )

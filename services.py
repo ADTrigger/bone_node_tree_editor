@@ -1,7 +1,14 @@
 import bpy
 from bpy.types import Armature, Context, Node
 
-from .blender_context import active_theme, fallback_context
+from .blender_context import (
+    active_object_of,
+    active_theme,
+    object_of,
+    pose_object_of,
+    selected_objects_of,
+    view_layer_active_object_of,
+)
 from .binding import ensure_bound_tree
 from .constants import BONE_PALETTE_TO_INDEX_MAP, TREE_IDNAME
 
@@ -14,31 +21,25 @@ def bone_node_tree_of(context: Context) -> bpy.types.NodeTree | None:
 
 
 def armature_of(context: Context) -> Armature | None:
-    if context.object is not None and context.object.type == "ARMATURE":
-        return context.object.data
+    obj = object_of(context)
+    if obj is not None and obj.type == "ARMATURE":
+        return obj.data
 
-    if getattr(context, "active_object", None) is not None and context.active_object.type == "ARMATURE":
-        return context.active_object.data
+    active_obj = active_object_of(context)
+    if active_obj is not None and active_obj.type == "ARMATURE":
+        return active_obj.data
 
-    if context.pose_object is not None and context.pose_object.type == "ARMATURE":
-        return context.pose_object.data
+    pose_obj = pose_object_of(context)
+    if pose_obj is not None and pose_obj.type == "ARMATURE":
+        return pose_obj.data
 
-    view_layer = getattr(context, "view_layer", None)
-    if view_layer is not None:
-        active_obj = view_layer.objects.active
-        if active_obj is not None and active_obj.type == "ARMATURE":
-            return active_obj.data
+    active_view_layer_obj = view_layer_active_object_of(context)
+    if active_view_layer_obj is not None and active_view_layer_obj.type == "ARMATURE":
+        return active_view_layer_obj.data
 
-    for obj in context.selected_objects:
+    for obj in selected_objects_of(context):
         if obj.type == "ARMATURE":
             return obj.data
-
-    global_context = fallback_context()
-    if global_context is not None:
-        if global_context.object is not None and global_context.object.type == "ARMATURE":
-            return global_context.object.data
-        if getattr(global_context, "active_object", None) is not None and global_context.active_object.type == "ARMATURE":
-            return global_context.active_object.data
 
     return None
 

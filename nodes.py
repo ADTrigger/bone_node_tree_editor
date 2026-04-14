@@ -2,7 +2,7 @@ import bpy
 from bpy.props import BoolProperty
 from bpy.types import Node, NodeTree
 
-from .blender_context import current_context, is_edit_armature_mode, is_object_mode, mode_of
+from .blender_context import current_context, is_edit_armature_mode
 from .binding import get_bound_armature
 from .constants import (
     BONE_NODE_ICON,
@@ -12,7 +12,12 @@ from .constants import (
     TREE_IDNAME,
     TREE_LABEL,
 )
-from .layout_controller import capture_node_layout_snapshot, restore_locked_tree_layout
+from .layout_controller import (
+    capture_node_layout_snapshot,
+    restore_locked_node_layout,
+    should_capture_layout,
+    should_restore_layout,
+)
 from .session import is_tree_mutating
 from .sync_controller import apply_node_parent_edit
 
@@ -25,10 +30,6 @@ class BoneNodeTree(NodeTree):
     def update(self):
         if is_tree_mutating(self):
             return
-
-        mode = mode_of()
-        if mode == "OBJECT":
-            restore_locked_tree_layout(self)
         return
 
 
@@ -123,5 +124,9 @@ class BoneNode(Node):
             origin="node_update",
         )
 
-        if not is_object_mode(context):
+        if should_restore_layout(context):
+            restore_locked_node_layout(node_tree, self)
+            return
+
+        if should_capture_layout(context):
             capture_node_layout_snapshot(node_tree, self)

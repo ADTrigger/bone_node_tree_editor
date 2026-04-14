@@ -1,8 +1,11 @@
 import bpy
 from bpy.app.handlers import persistent
 
+from .binding import clear_binding_runtime_state
+from .migration import migrate_all_data
 from .session import clear_all_tree_sessions
 from .sync_controller import mark_all_bound_trees_dirty, mark_bound_tree_dirty
+from .ui import request_editor_sync
 
 
 def _iter_updated_armatures(depsgraph):
@@ -42,26 +45,36 @@ def _iter_updated_armatures(depsgraph):
 @persistent
 def _on_depsgraph_update_post(scene, depsgraph):
     del scene
+    marked_any = False
     for armature, flags in _iter_updated_armatures(depsgraph):
         mark_bound_tree_dirty(armature, *flags)
+        marked_any = True
+    if marked_any:
+        request_editor_sync()
 
 
 @persistent
 def _on_undo_post(_dummy):
     clear_all_tree_sessions()
+    clear_binding_runtime_state()
     mark_all_bound_trees_dirty("topology", "selection")
+    request_editor_sync()
 
 
 @persistent
 def _on_redo_post(_dummy):
     clear_all_tree_sessions()
+    clear_binding_runtime_state()
     mark_all_bound_trees_dirty("topology", "selection")
+    request_editor_sync()
 
 
 @persistent
 def _on_load_post(_dummy):
     clear_all_tree_sessions()
+    migrate_all_data()
     mark_all_bound_trees_dirty("binding", "topology", "selection")
+    request_editor_sync()
 
 
 def _append_handler(handler_list, callback):
@@ -85,6 +98,7 @@ def register_event_hooks():
     _append_handler(getattr(handlers, "redo_post", None), _on_redo_post)
     _append_handler(getattr(handlers, "load_post", None), _on_load_post)
     mark_all_bound_trees_dirty("binding", "topology", "selection")
+    request_editor_sync()
 
 
 def unregister_event_hooks():

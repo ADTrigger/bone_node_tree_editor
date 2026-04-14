@@ -3,13 +3,36 @@ from bpy.types import Context
 from .layout import arrange_nodes
 from .services import sync_bone_color_to_node
 from .session import snapshot_for_tree, tree_mutation
+from .snapshots import collect_topology_snapshot, sync_snapshot_from_tree
 from .sync_common import (
     bone_collection_for_context,
     bone_parent_state,
-    collect_topology_signature,
     parent_socket_name,
-    sync_snapshot_from_tree,
 )
+
+
+def needs_tree_rebuild(node_tree, *, bones=None) -> bool:
+    from .nodes import BoneNode
+
+    del bones
+
+    seen_names = set()
+    for node in node_tree.nodes:
+        if node.bl_idname != BoneNode.bl_idname:
+            return True
+
+        if node.name in seen_names:
+            return True
+        seen_names.add(node.name)
+
+        if node.inputs.get(BoneNode.PARENT_SOCKET_NAME) is None:
+            return True
+        if node.inputs.get(BoneNode.CONNECTED_PARENT_SOCKET_NAME) is None:
+            return True
+        if node.outputs.get(BoneNode.CHILD_SOCKET_NAME) is None:
+            return True
+
+    return False
 
 
 def normalize_parent_links(node_tree, node, preferred_socket_name: str | None = None):
@@ -199,7 +222,7 @@ def rebuild_tree_from_armature(
     capture_layout: bool = True,
     bones=None,
     snapshot=None,
-    topology_signature=None,
+    topology_snapshot=None,
 ):
     from .nodes import BoneNode
 
@@ -207,8 +230,8 @@ def rebuild_tree_from_armature(
         bones = bone_collection_for_context(context, armature)
     if snapshot is None:
         snapshot = snapshot_for_tree(node_tree)
-    if topology_signature is None:
-        topology_signature = collect_topology_signature(bones)
+    if topology_snapshot is None:
+        topology_snapshot = collect_topology_snapshot(bones)
 
     nodes = node_tree.nodes
 
@@ -249,12 +272,16 @@ def rebuild_tree_from_armature(
 
     if should_arrange:
         arrange_nodes(root_bones, nodes)
+    elif snapshot.node_layout:
+        from .layout_controller import restore_locked_tree_layout
+
+        restore_locked_tree_layout(node_tree, snapshot=snapshot)
 
     sync_snapshot_from_tree(
         snapshot,
         node_tree,
         bones,
-        topology_signature,
+        topology_snapshot,
         capture_layout=capture_layout,
     )
 
@@ -268,7 +295,7 @@ def reconcile_tree_from_armature(
     capture_layout: bool = True,
     bones=None,
     snapshot=None,
-    topology_signature=None,
+    topology_snapshot=None,
 ):
     from .nodes import BoneNode
 
@@ -276,8 +303,8 @@ def reconcile_tree_from_armature(
         bones = bone_collection_for_context(context, armature)
     if snapshot is None:
         snapshot = snapshot_for_tree(node_tree)
-    if topology_signature is None:
-        topology_signature = collect_topology_signature(bones)
+    if topology_snapshot is None:
+        topology_snapshot = collect_topology_snapshot(bones)
 
     nodes = node_tree.nodes
     bone_names = {bone.name for bone in bones}
@@ -357,6 +384,6 @@ def reconcile_tree_from_armature(
         snapshot,
         node_tree,
         bones,
-        topology_signature,
+        topology_snapshot,
         capture_layout=capture_layout,
     )

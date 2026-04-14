@@ -1,43 +1,25 @@
 import bpy
 from bpy.types import Context
 
+from .blender_context import current_context, space_data_of, temp_override_context
 from .binding import ensure_bound_tree, get_bound_tree
-from .constants import EDITOR_SYNC_INTERVAL
+from .constants import EDITOR_EVENT_SYNC_DELAY, EDITOR_SYNC_INTERVAL
 from .operators import OT_SyncBoneNodeSelection, OT_UpdateBoneNodeTree
 from .services import armature_of, is_in_bone_node_tree
-from .session import session_for_tree
+from .session import prune_tree_sessions, session_for_tree
 from .state import is_ui_hooks_registered, set_ui_hooks_registered
 from .sync_controller import mark_bound_tree_dirty, sync_bound_tree
-from .ui_state import clear_all_editor_states, editor_key_for_space, prune_editor_states, update_editor_state
-
-
-def _iter_node_editor_overrides():
-    window_manager = getattr(bpy.context, "window_manager", None)
-    if window_manager is None:
-        return
-
-    for window in window_manager.windows:
-        screen = getattr(window, "screen", None)
-        if screen is None:
-            continue
-
-        for area in screen.areas:
-            if area.type != "NODE_EDITOR":
-                continue
-
-            space = area.spaces.active
-            if space is None or space.type != "NODE_EDITOR":
-                continue
-
-            region = next((region for region in area.regions if region.type == "WINDOW"), None)
-            if region is None:
-                continue
-
-            yield window, area, region, space
+from .ui_state import (
+    clear_all_editor_states,
+    iter_editor_contexts,
+    prune_editor_states,
+    remember_editor_context,
+    update_editor_state,
+)
 
 
 def _active_editor_tree_for_armature(context: Context, armature):
-    space = context.space_data
+    space = space_data_of(context)
     if space is None or space.type != "NODE_EDITOR":
         return None
 
@@ -60,69 +42,141 @@ def _active_editor_tree_for_armature(context: Context, armature):
     return bound_tree
 
 
+def _sync_registered_editor(
+    context: Context,
+    *,
+    window,
+    area,
+    region,
+    space,
+    allow_fallback_selection: bool,
+    origin: str,
+):
+    if not is_in_bone_node_tree(context):
+        update_editor_state(
+            space,
+            window=window,
+            area=area,
+            region=region,
+            mode=getattr(context, "mode", None),
+            pinned=bool(getattr(space, "pin", False)),
+        )
+        return False
+
+    armature = armature_of(context)
+    if armature is None:
+        update_editor_state(
+            space,
+            window=window,
+            area=area,
+            region=region,
+            mode=getattr(context, "mode", None),
+            pinned=bool(getattr(space, "pin", False)),
+        )
+        return False
+
+    node_tree = _active_editor_tree_for_armature(context, armature)
+    if node_tree is None:
+        update_editor_state(
+            space,
+            window=window,
+            area=area,
+            region=region,
+            armature=armature,
+            mode=getattr(context, "mode", None),
+            pinned=bool(getattr(space, "pin", False)),
+        )
+        return False
+
+    editor_changed = update_editor_state(
+        space,
+        window=window,
+        area=area,
+        region=region,
+        armature=armature,
+        node_tree=node_tree,
+        mode=getattr(context, "mode", None),
+        pinned=bool(getattr(space, "pin", False)),
+    )
+    if editor_changed:
+        mark_bound_tree_dirty(armature, "binding", "selection")
+
+    session = session_for_tree(node_tree)
+    should_sync = editor_changed or session.has_dirty()
+    if not should_sync and allow_fallback_selection:
+        should_sync = session.should_run_selection_fallback()
+
+    if not should_sync:
+        return False
+
+    sync_bound_tree(
+        context,
+        armature,
+        node_tree,
+        allow_fallback_selection=allow_fallback_selection,
+        origin=origin,
+    )
+    return True
+
+
+def _sync_registered_editors(*, allow_fallback_selection: bool, origin: str):
+    synced_any = False
+    for window, area, region, space in iter_editor_contexts():
+        with temp_override_context(window=window, area=area, region=region, space_data=space):
+            context = current_context()
+            if _sync_registered_editor(
+                context,
+                window=window,
+                area=area,
+                region=region,
+                space=space,
+                allow_fallback_selection=allow_fallback_selection,
+                origin=origin,
+            ):
+                synced_any = True
+    return synced_any
+
+
+def request_editor_sync(*, first_interval: float = EDITOR_EVENT_SYNC_DELAY):
+    if not is_ui_hooks_registered():
+        return
+
+    if bpy.app.timers.is_registered(_run_event_driven_editor_sync):
+        return
+
+    bpy.app.timers.register(_run_event_driven_editor_sync, first_interval=first_interval)
+
+
+def _run_event_driven_editor_sync():
+    if not is_ui_hooks_registered():
+        return None
+
+    prune_tree_sessions()
+    prune_editor_states()
+    _sync_registered_editors(
+        allow_fallback_selection=False,
+        origin="event_bridge",
+    )
+    return None
+
+
 def _poll_active_editor_tree_sync():
     if not is_ui_hooks_registered():
         return None
 
-    active_editor_keys = set()
-    for window, area, region, space in _iter_node_editor_overrides():
-        active_editor_keys.add(editor_key_for_space(space))
-        with bpy.context.temp_override(window=window, area=area, region=region, space_data=space):
-            context = bpy.context
-            if not is_in_bone_node_tree(context):
-                update_editor_state(
-                    space,
-                    mode=getattr(context, "mode", None),
-                    pinned=bool(getattr(space, "pin", False)),
-                )
-                continue
-
-            armature = armature_of(context)
-            if armature is None:
-                update_editor_state(
-                    space,
-                    mode=getattr(context, "mode", None),
-                    pinned=bool(getattr(space, "pin", False)),
-                )
-                continue
-
-            node_tree = _active_editor_tree_for_armature(context, armature)
-            if node_tree is None:
-                update_editor_state(
-                    space,
-                    armature=armature,
-                    mode=getattr(context, "mode", None),
-                    pinned=bool(getattr(space, "pin", False)),
-                )
-                continue
-
-            editor_changed = update_editor_state(
-                space,
-                armature=armature,
-                node_tree=node_tree,
-                mode=getattr(context, "mode", None),
-                pinned=bool(getattr(space, "pin", False)),
-            )
-            if editor_changed:
-                mark_bound_tree_dirty(armature, "binding", "selection")
-
-            session = session_for_tree(node_tree)
-            if not editor_changed and not session.has_dirty() and not session.should_run_selection_fallback():
-                continue
-
-            sync_bound_tree(
-                context,
-                armature,
-                node_tree,
-                allow_fallback_selection=True,
-                origin="ui_timer",
-            )
-
-    prune_editor_states(active_editor_keys)
+    prune_tree_sessions()
+    prune_editor_states()
+    _sync_registered_editors(
+        allow_fallback_selection=True,
+        origin="ui_timer",
+    )
     return EDITOR_SYNC_INTERVAL
 
 
 def _draw_pie(this: bpy.types.Menu, context: Context):
+    if remember_editor_context(context):
+        request_editor_sync()
+
     if is_in_bone_node_tree(context):
         pie = this.layout.menu_pie()
         pie.operator(OT_SyncBoneNodeSelection.bl_idname, icon="UV_SYNC_SELECT")
@@ -130,6 +184,9 @@ def _draw_pie(this: bpy.types.Menu, context: Context):
 
 
 def _draw_header_status(this, context: Context):
+    if remember_editor_context(context):
+        request_editor_sync()
+
     if not is_in_bone_node_tree(context):
         return
 
@@ -146,7 +203,8 @@ def register_ui_hooks():
     bpy.types.NODE_MT_view_pie.append(_draw_pie)
     bpy.types.NODE_HT_header.append(_draw_header_status)
     if not bpy.app.timers.is_registered(_poll_active_editor_tree_sync):
-        bpy.app.timers.register(_poll_active_editor_tree_sync, first_interval=0.0)
+        bpy.app.timers.register(_poll_active_editor_tree_sync, first_interval=EDITOR_SYNC_INTERVAL)
+    request_editor_sync()
 
 
 def unregister_ui_hooks():
@@ -159,3 +217,5 @@ def unregister_ui_hooks():
     bpy.types.NODE_HT_header.remove(_draw_header_status)
     if bpy.app.timers.is_registered(_poll_active_editor_tree_sync):
         bpy.app.timers.unregister(_poll_active_editor_tree_sync)
+    if bpy.app.timers.is_registered(_run_event_driven_editor_sync):
+        bpy.app.timers.unregister(_run_event_driven_editor_sync)

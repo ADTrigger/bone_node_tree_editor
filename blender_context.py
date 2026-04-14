@@ -1,4 +1,5 @@
 import bpy
+from contextlib import contextmanager
 
 
 def current_context():
@@ -51,3 +52,58 @@ def set_active_vertex_group_by_name(obj, group_name: str | None):
 
     group_index = vertex_groups.find(group_name)
     vertex_groups.active_index = group_index
+
+
+def object_of(context=None):
+    return getattr(fallback_context(context), "object", None)
+
+
+def active_object_of(context=None):
+    return getattr(fallback_context(context), "active_object", None)
+
+
+def pose_object_of(context=None):
+    return getattr(fallback_context(context), "pose_object", None)
+
+
+def selected_objects_of(context=None):
+    selected_objects = getattr(fallback_context(context), "selected_objects", None)
+    if selected_objects is None:
+        return ()
+    return tuple(selected_objects)
+
+
+def view_layer_of(context=None):
+    return getattr(fallback_context(context), "view_layer", None)
+
+
+def view_layer_active_object_of(context=None):
+    view_layer = view_layer_of(context)
+    if view_layer is None:
+        return None
+    objects = getattr(view_layer, "objects", None)
+    if objects is None:
+        return None
+    return getattr(objects, "active", None)
+
+
+def space_data_of(context=None):
+    return getattr(fallback_context(context), "space_data", None)
+
+
+def window_of(context=None):
+    return getattr(fallback_context(context), "window", None)
+
+
+def area_of(context=None):
+    return getattr(fallback_context(context), "area", None)
+
+
+def region_of(context=None):
+    return getattr(fallback_context(context), "region", None)
+
+
+@contextmanager
+def temp_override_context(*, window, area, region, space_data):
+    with bpy.context.temp_override(window=window, area=area, region=region, space_data=space_data):
+        yield bpy.context
