@@ -1,7 +1,7 @@
 from bpy.types import Operator
 
-from .services import armature_of
-from .sync_controller import sync_context_tree
+from ..controllers.sync_controller import sync_context_tree
+from ..domain.services import armature_of
 
 
 class OT_UpdateBoneNodeTree(Operator):

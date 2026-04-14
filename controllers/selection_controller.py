@@ -1,17 +1,17 @@
 from bpy.types import Context
 
-from .blender_context import set_active_vertex_group_by_name
-from .diff import diff_selection_state
-from .services import set_bone_select
-from .session import snapshot_for_tree
-from .snapshots import (
+from ..core.blender_context import set_active_vertex_group_by_name
+from ..core.session import snapshot_for_tree
+from ..domain.services import set_bone_select
+from ..domain.sync_common import bone_collection_for_context
+from ..models.diff import diff_selection_state
+from ..models.snapshots import (
     BoneSelectionSnapshot,
     collect_bone_selection_snapshot,
     collect_node_selection_snapshot,
     collect_topology_snapshot,
     sync_snapshot,
 )
-from .sync_common import bone_collection_for_context
 
 
 def _sync_active_weight_group(context: Context, active_bone_name: str | None):

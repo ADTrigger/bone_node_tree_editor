@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from .constants import EDITOR_IDLE_SELECTION_SYNC_INTERVAL
+from ..core.constants import EDITOR_IDLE_SELECTION_SYNC_INTERVAL
+from ..core.session import mark_tree_dirty, session_for_tree
+from ..domain.services import armature_of, bone_node_tree_of
 from .selection_controller import sync_selection_state
-from .services import armature_of, bone_node_tree_of
-from .session import mark_tree_dirty, session_for_tree
 from .sync import sync_tree_from_armature
 from .topology_controller import apply_node_parent_link_edit
 
@@ -117,7 +117,7 @@ def mark_context_tree_dirty(context, *flags: str):
 
 
 def mark_bound_tree_dirty(armature, *flags: str):
-    from .binding import get_bound_tree
+    from ..core.binding import get_bound_tree
 
     node_tree = get_bound_tree(armature)
     mark_tree_dirty(node_tree, *flags)

@@ -11,7 +11,7 @@ def bone_parent_state(bone):
 
 
 def parent_socket_name(use_connect: bool) -> str:
-    from .nodes import BoneNode
+    from ..ui.nodes import BoneNode
 
     if use_connect:
         return BoneNode.CONNECTED_PARENT_SOCKET_NAME

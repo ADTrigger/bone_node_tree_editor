@@ -1,10 +1,10 @@
 from bpy.types import Context
 
-from .diff import diff_topology_state
+from ..core.session import snapshot_for_tree
+from ..domain.sync_common import bone_collection_for_context
+from ..models.diff import diff_topology_state
+from ..models.snapshots import collect_topology_snapshot
 from .selection_controller import sync_selection_state
-from .session import snapshot_for_tree
-from .snapshots import collect_topology_snapshot
-from .sync_common import bone_collection_for_context
 from .topology_controller import (
     needs_tree_rebuild,
     rebuild_tree_from_armature,

@@ -13,13 +13,13 @@ bl_info = {
 
 import bpy
 
-from .binding import clear_binding_runtime_state
-from .event_bridge import register_event_hooks, unregister_event_hooks
-from .migration import migrate_all_data
-from .nodes import BoneNodeTree, BoneNode
-from .operators import OT_UpdateBoneNodeTree, OT_SyncBoneNodeSelection
-from .session import clear_all_tree_sessions
-from .ui import register_ui_hooks, unregister_ui_hooks
+from .core.binding import clear_binding_runtime_state
+from .core.migration import migrate_all_data
+from .core.session import clear_all_tree_sessions
+from .events.event_bridge import register_event_hooks, unregister_event_hooks
+from .ui.nodes import BoneNodeTree, BoneNode
+from .ui.operators import OT_UpdateBoneNodeTree, OT_SyncBoneNodeSelection
+from .ui.ui import register_ui_hooks, unregister_ui_hooks
 
 
 classes = [

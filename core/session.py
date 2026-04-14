@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from time import monotonic
 from uuid import uuid4
 
-from .snapshots import TreeSyncSnapshot
+from ..models.snapshots import TreeSyncSnapshot
 
 
 @dataclass

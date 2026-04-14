@@ -1,11 +1,11 @@
 import bpy
 from bpy.app.handlers import persistent
 
-from .binding import clear_binding_runtime_state
-from .migration import migrate_all_data
-from .session import clear_all_tree_sessions
-from .sync_controller import mark_all_bound_trees_dirty, mark_bound_tree_dirty
-from .ui import request_editor_sync
+from ..controllers.sync_controller import mark_all_bound_trees_dirty, mark_bound_tree_dirty
+from ..core.binding import clear_binding_runtime_state
+from ..core.migration import migrate_all_data
+from ..core.session import clear_all_tree_sessions
+from ..ui.ui import request_editor_sync
 
 
 def _iter_updated_armatures(depsgraph):

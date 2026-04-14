@@ -1,18 +1,18 @@
 from bpy.types import Context
 
-from .layout import arrange_nodes
-from .services import sync_bone_color_to_node
-from .session import snapshot_for_tree, tree_mutation
-from .snapshots import collect_topology_snapshot, sync_snapshot_from_tree
-from .sync_common import (
+from ..core.session import snapshot_for_tree, tree_mutation
+from ..domain.layout import arrange_nodes
+from ..domain.services import sync_bone_color_to_node
+from ..domain.sync_common import (
     bone_collection_for_context,
     bone_parent_state,
     parent_socket_name,
 )
+from ..models.snapshots import collect_topology_snapshot, sync_snapshot_from_tree
 
 
 def needs_tree_rebuild(node_tree, *, bones=None) -> bool:
-    from .nodes import BoneNode
+    from ..ui.nodes import BoneNode
 
     del bones
 
@@ -36,7 +36,7 @@ def needs_tree_rebuild(node_tree, *, bones=None) -> bool:
 
 
 def normalize_parent_links(node_tree, node, preferred_socket_name: str | None = None):
-    from .nodes import BoneNode
+    from ..ui.nodes import BoneNode
 
     socket_names = (
         BoneNode.PARENT_SOCKET_NAME,
@@ -86,7 +86,7 @@ def normalize_parent_links(node_tree, node, preferred_socket_name: str | None = 
 
 
 def normalized_parent_state(node_tree, node, preferred_socket_name: str | None = None):
-    from .nodes import BoneNode
+    from ..ui.nodes import BoneNode
 
     keep_socket_name, keep_link, removed_any = normalize_parent_links(
         node_tree,
@@ -131,7 +131,7 @@ def apply_parent_link_change(context: Context, armature, node, parent_name: str 
 
 
 def restore_node_parent_from_bone(node_tree, node, bone) -> bool:
-    from .nodes import BoneNode
+    from ..ui.nodes import BoneNode
 
     parent_name, use_connect = bone_parent_state(bone)
     preferred_socket_name = parent_socket_name(use_connect) if parent_name else None
@@ -224,7 +224,7 @@ def rebuild_tree_from_armature(
     snapshot=None,
     topology_snapshot=None,
 ):
-    from .nodes import BoneNode
+    from ..ui.nodes import BoneNode
 
     if bones is None:
         bones = bone_collection_for_context(context, armature)
@@ -297,7 +297,7 @@ def reconcile_tree_from_armature(
     snapshot=None,
     topology_snapshot=None,
 ):
-    from .nodes import BoneNode
+    from ..ui.nodes import BoneNode
 
     if bones is None:
         bones = bone_collection_for_context(context, armature)

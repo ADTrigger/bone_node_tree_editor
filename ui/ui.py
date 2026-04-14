@@ -1,14 +1,14 @@
 import bpy
 from bpy.types import Context
 
-from .blender_context import current_context, space_data_of, temp_override_context
-from .binding import ensure_bound_tree, get_bound_tree
-from .constants import EDITOR_EVENT_SYNC_DELAY, EDITOR_SYNC_INTERVAL
+from ..controllers.sync_controller import mark_bound_tree_dirty, sync_bound_tree
+from ..core.blender_context import current_context, space_data_of, temp_override_context
+from ..core.binding import ensure_bound_tree, get_bound_tree
+from ..core.constants import EDITOR_EVENT_SYNC_DELAY, EDITOR_SYNC_INTERVAL
+from ..core.session import prune_tree_sessions, session_for_tree
+from ..core.state import is_ui_hooks_registered, set_ui_hooks_registered
+from ..domain.services import armature_of, is_in_bone_node_tree
 from .operators import OT_SyncBoneNodeSelection, OT_UpdateBoneNodeTree
-from .services import armature_of, is_in_bone_node_tree
-from .session import prune_tree_sessions, session_for_tree
-from .state import is_ui_hooks_registered, set_ui_hooks_registered
-from .sync_controller import mark_bound_tree_dirty, sync_bound_tree
 from .ui_state import (
     clear_all_editor_states,
     iter_editor_contexts,

@@ -1,7 +1,7 @@
 import bpy
 from bpy.types import Armature, Context, Node
 
-from .blender_context import (
+from ..core.blender_context import (
     active_object_of,
     active_theme,
     object_of,
@@ -9,8 +9,8 @@ from .blender_context import (
     selected_objects_of,
     view_layer_active_object_of,
 )
-from .binding import ensure_bound_tree
-from .constants import BONE_PALETTE_TO_INDEX_MAP, TREE_IDNAME
+from ..core.binding import ensure_bound_tree
+from ..core.constants import BONE_PALETTE_TO_INDEX_MAP, TREE_IDNAME
 
 
 def bone_node_tree_of(context: Context) -> bpy.types.NodeTree | None:
