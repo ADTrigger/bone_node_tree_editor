@@ -8,6 +8,7 @@ from ..controllers.layout_controller import (
     should_capture_layout,
     should_restore_layout,
 )
+from ..core import node_schema
 from ..controllers.sync_controller import apply_node_parent_edit
 from ..core.blender_context import current_context, is_edit_armature_mode
 from ..core.binding import get_bound_armature
@@ -37,23 +38,38 @@ class BoneNode(Node):
     bl_idname = BONE_NODE_IDNAME
     bl_label = BONE_NODE_LABEL
     bl_icon = BONE_NODE_ICON
-    PARENT_SOCKET_NAME = "Parent"
-    CONNECTED_PARENT_SOCKET_NAME = "Connected Parent"
-    CHILD_SOCKET_NAME = "Child Of"
+    PARENT_SOCKET_NAME = node_schema.PARENT_SOCKET_NAME
+    CONNECTED_PARENT_SOCKET_NAME = node_schema.CONNECTED_PARENT_SOCKET_NAME
+    CHILD_SOCKET_NAME = node_schema.CHILD_SOCKET_NAME
+    CHILD_OUTPUT_SPACER_IDENTIFIER = node_schema.CHILD_OUTPUT_SPACER_IDENTIFIER
     has_parent: BoolProperty(name="has_parent", default=False)  # type: ignore
     is_connected_parent: BoolProperty(name="is_connected_parent", default=False)  # type: ignore
+    layout_locked: BoolProperty(name="Lock Layout", default=False)  # type: ignore
 
     def init(self, context):
         del context
+        self.use_custom_color = False
         parent_socket = self.inputs.new("NodeSocketString", self.PARENT_SOCKET_NAME)
         parent_socket.hide_value = True
         connected_parent_socket = self.inputs.new("NodeSocketString", self.CONNECTED_PARENT_SOCKET_NAME)
         connected_parent_socket.hide_value = True
+        spacer_output = self.outputs.new(
+            "NodeSocketString",
+            "",
+            identifier=self.CHILD_OUTPUT_SPACER_IDENTIFIER,
+        )
+        spacer_output.enabled = False
+        spacer_output.display_shape = "CIRCLE_DOT"
         self.outputs.new("NodeSocketString", self.CHILD_SOCKET_NAME)
         self.hide = False
 
     def draw_label(self):
         return self.name
+
+    def draw_buttons(self, context, layout):
+        del context
+        icon = "LOCKED" if self.layout_locked else "UNLOCKED"
+        layout.prop(self, "layout_locked", text="Lock Layout", toggle=True, icon=icon)
 
     @classmethod
     def poll(self, node_tree):

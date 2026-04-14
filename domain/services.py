@@ -3,14 +3,13 @@ from bpy.types import Armature, Context, Node
 
 from ..core.blender_context import (
     active_object_of,
-    active_theme,
     object_of,
     pose_object_of,
     selected_objects_of,
     view_layer_active_object_of,
 )
 from ..core.binding import ensure_bound_tree
-from ..core.constants import BONE_PALETTE_TO_INDEX_MAP, TREE_IDNAME
+from ..core.constants import TREE_IDNAME
 
 
 def bone_node_tree_of(context: Context) -> bpy.types.NodeTree | None:
@@ -45,22 +44,8 @@ def armature_of(context: Context) -> Armature | None:
 
 
 def sync_bone_color_to_node(bone_color: bpy.types.BoneColor, node: Node):
-    if bone_color.is_custom:
-        node.color = bone_color.custom.normal
-        node.use_custom_color = True
-    else:
-        index = BONE_PALETTE_TO_INDEX_MAP.get(bone_color.palette)
-        theme = active_theme()
-        if theme is None:
-            node.use_custom_color = False
-            return
-        if index is not None:
-            color_set = theme.bone_color_sets[index]
-            if color_set:
-                node.color = color_set.normal
-                node.use_custom_color = True
-        else:
-            node.use_custom_color = False
+    del bone_color
+    node.use_custom_color = False
 
 
 def set_bone_select(bone, state: bool):

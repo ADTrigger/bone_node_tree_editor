@@ -2,14 +2,16 @@ from bpy.types import Context
 
 from ..core.blender_context import set_active_vertex_group_by_name
 from ..core.session import snapshot_for_tree
+from ..domain.snapshot_collectors import (
+    collect_bone_selection_snapshot,
+    collect_node_selection_snapshot,
+    collect_topology_snapshot,
+)
 from ..domain.services import set_bone_select
 from ..domain.sync_common import bone_collection_for_context
 from ..models.diff import diff_selection_state
 from ..models.snapshots import (
     BoneSelectionSnapshot,
-    collect_bone_selection_snapshot,
-    collect_node_selection_snapshot,
-    collect_topology_snapshot,
     sync_snapshot,
 )
 

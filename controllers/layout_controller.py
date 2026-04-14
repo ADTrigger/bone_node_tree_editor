@@ -1,6 +1,7 @@
 from ..core.blender_context import is_object_mode
 from ..core.session import snapshot_for_tree, tree_mutation
-from ..models.snapshots import collect_node_layout_snapshot, node_layout_state, sync_snapshot
+from ..domain.snapshot_collectors import collect_node_layout_snapshot, node_layout_state
+from ..models.snapshots import sync_snapshot
 
 
 def should_restore_layout(context=None) -> bool:

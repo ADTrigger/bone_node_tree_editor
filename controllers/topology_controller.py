@@ -1,50 +1,55 @@
 from bpy.types import Context
 
+from ..core.constants import BONE_NODE_IDNAME
+from ..core.node_schema import (
+    CHILD_SOCKET_NAME,
+    CHILD_OUTPUT_SPACER_IDENTIFIER,
+    CONNECTED_PARENT_SOCKET_NAME,
+    PARENT_INPUT_SOCKET_NAMES,
+    PARENT_SOCKET_NAME,
+)
 from ..core.session import snapshot_for_tree, tree_mutation
 from ..domain.layout import arrange_nodes
+from ..domain.snapshot_collectors import collect_topology_snapshot, sync_snapshot_from_tree
 from ..domain.services import sync_bone_color_to_node
 from ..domain.sync_common import (
     bone_collection_for_context,
     bone_parent_state,
     parent_socket_name,
 )
-from ..models.snapshots import collect_topology_snapshot, sync_snapshot_from_tree
 
 
 def needs_tree_rebuild(node_tree, *, bones=None) -> bool:
-    from ..ui.nodes import BoneNode
-
     del bones
 
     seen_names = set()
     for node in node_tree.nodes:
-        if node.bl_idname != BoneNode.bl_idname:
+        if node.bl_idname != BONE_NODE_IDNAME:
             return True
 
         if node.name in seen_names:
             return True
         seen_names.add(node.name)
 
-        if node.inputs.get(BoneNode.PARENT_SOCKET_NAME) is None:
+        if node.inputs.get(PARENT_SOCKET_NAME) is None:
             return True
-        if node.inputs.get(BoneNode.CONNECTED_PARENT_SOCKET_NAME) is None:
+        if node.inputs.get(CONNECTED_PARENT_SOCKET_NAME) is None:
             return True
-        if node.outputs.get(BoneNode.CHILD_SOCKET_NAME) is None:
+        if node.outputs.get(CHILD_SOCKET_NAME) is None:
+            return True
+        if not any(
+            output.identifier == CHILD_OUTPUT_SPACER_IDENTIFIER
+            for output in node.outputs
+        ):
             return True
 
     return False
 
 
 def normalize_parent_links(node_tree, node, preferred_socket_name: str | None = None):
-    from ..ui.nodes import BoneNode
-
-    socket_names = (
-        BoneNode.PARENT_SOCKET_NAME,
-        BoneNode.CONNECTED_PARENT_SOCKET_NAME,
-    )
     links_by_socket = {
         socket_name: list(node.inputs[socket_name].links)
-        for socket_name in socket_names
+        for socket_name in PARENT_INPUT_SOCKET_NAMES
         if node.inputs.get(socket_name) is not None
     }
 
@@ -54,22 +59,22 @@ def normalize_parent_links(node_tree, node, preferred_socket_name: str | None = 
     if preferred_socket_name in links_by_socket and links_by_socket[preferred_socket_name]:
         keep_socket_name = preferred_socket_name
         keep_link = links_by_socket[preferred_socket_name][-1]
-    elif links_by_socket.get(BoneNode.CONNECTED_PARENT_SOCKET_NAME) and not links_by_socket.get(BoneNode.PARENT_SOCKET_NAME):
-        keep_socket_name = BoneNode.CONNECTED_PARENT_SOCKET_NAME
+    elif links_by_socket.get(CONNECTED_PARENT_SOCKET_NAME) and not links_by_socket.get(PARENT_SOCKET_NAME):
+        keep_socket_name = CONNECTED_PARENT_SOCKET_NAME
         keep_link = links_by_socket[keep_socket_name][0]
-    elif links_by_socket.get(BoneNode.PARENT_SOCKET_NAME) and not links_by_socket.get(BoneNode.CONNECTED_PARENT_SOCKET_NAME):
-        keep_socket_name = BoneNode.PARENT_SOCKET_NAME
+    elif links_by_socket.get(PARENT_SOCKET_NAME) and not links_by_socket.get(CONNECTED_PARENT_SOCKET_NAME):
+        keep_socket_name = PARENT_SOCKET_NAME
         keep_link = links_by_socket[keep_socket_name][0]
-    elif links_by_socket.get(BoneNode.PARENT_SOCKET_NAME) or links_by_socket.get(BoneNode.CONNECTED_PARENT_SOCKET_NAME):
+    elif links_by_socket.get(PARENT_SOCKET_NAME) or links_by_socket.get(CONNECTED_PARENT_SOCKET_NAME):
         default_socket_name = (
-            BoneNode.CONNECTED_PARENT_SOCKET_NAME if node.is_connected_parent else BoneNode.PARENT_SOCKET_NAME
+            CONNECTED_PARENT_SOCKET_NAME if node.is_connected_parent else PARENT_SOCKET_NAME
         )
         keep_socket_name = default_socket_name
         if not links_by_socket.get(keep_socket_name):
             keep_socket_name = (
-                BoneNode.CONNECTED_PARENT_SOCKET_NAME
-                if links_by_socket.get(BoneNode.CONNECTED_PARENT_SOCKET_NAME)
-                else BoneNode.PARENT_SOCKET_NAME
+                CONNECTED_PARENT_SOCKET_NAME
+                if links_by_socket.get(CONNECTED_PARENT_SOCKET_NAME)
+                else PARENT_SOCKET_NAME
             )
         keep_link = links_by_socket[keep_socket_name][0]
 
@@ -86,8 +91,6 @@ def normalize_parent_links(node_tree, node, preferred_socket_name: str | None = 
 
 
 def normalized_parent_state(node_tree, node, preferred_socket_name: str | None = None):
-    from ..ui.nodes import BoneNode
-
     keep_socket_name, keep_link, removed_any = normalize_parent_links(
         node_tree,
         node,
@@ -100,7 +103,7 @@ def normalized_parent_state(node_tree, node, preferred_socket_name: str | None =
         node_tree.links.remove(keep_link)
         return None, False, None, True
 
-    is_connected_parent = keep_socket_name == BoneNode.CONNECTED_PARENT_SOCKET_NAME
+    is_connected_parent = keep_socket_name == CONNECTED_PARENT_SOCKET_NAME
     return keep_link.from_node.name, is_connected_parent, keep_link, removed_any
 
 
@@ -131,8 +134,6 @@ def apply_parent_link_change(context: Context, armature, node, parent_name: str 
 
 
 def restore_node_parent_from_bone(node_tree, node, bone) -> bool:
-    from ..ui.nodes import BoneNode
-
     parent_name, use_connect = bone_parent_state(bone)
     preferred_socket_name = parent_socket_name(use_connect) if parent_name else None
     current_parent_name, current_use_connect, _, removed_any = normalized_parent_state(
@@ -152,12 +153,8 @@ def restore_node_parent_from_bone(node_tree, node, bone) -> bool:
         node.is_connected_parent = expected_use_connect
         return False
 
-    socket_names = (
-        BoneNode.PARENT_SOCKET_NAME,
-        BoneNode.CONNECTED_PARENT_SOCKET_NAME,
-    )
     with tree_mutation(node_tree, origin="restore_node_parent_from_bone"):
-        for socket_name in socket_names:
+        for socket_name in PARENT_INPUT_SOCKET_NAMES:
             for link in list(node.inputs[socket_name].links):
                 node_tree.links.remove(link)
 
@@ -165,7 +162,7 @@ def restore_node_parent_from_bone(node_tree, node, bone) -> bool:
             parent_node = node_tree.nodes.get(parent_name)
             if parent_node is not None:
                 node_tree.links.new(
-                    parent_node.outputs[BoneNode.CHILD_SOCKET_NAME],
+                    parent_node.outputs[CHILD_SOCKET_NAME],
                     node.inputs[parent_socket_name(expected_use_connect)],
                 )
 
@@ -223,9 +220,8 @@ def rebuild_tree_from_armature(
     bones=None,
     snapshot=None,
     topology_snapshot=None,
+    reparented_bone_names: set[str] | frozenset[str] | None = None,
 ):
-    from ..ui.nodes import BoneNode
-
     if bones is None:
         bones = bone_collection_for_context(context, armature)
     if snapshot is None:
@@ -234,18 +230,23 @@ def rebuild_tree_from_armature(
         topology_snapshot = collect_topology_snapshot(bones)
 
     nodes = node_tree.nodes
+    lock_state_by_name = {
+        node.name: bool(getattr(node, "layout_locked", False))
+        for node in nodes
+    }
 
     with tree_mutation(node_tree, origin="rebuild_tree_from_armature"):
         nodes.clear()
         node_tree.links.clear()
 
         for bone in bones:
-            node = nodes.new(BoneNode.bl_idname)
+            node = nodes.new(BONE_NODE_IDNAME)
             node.name = bone.name
             node.width = len(node.name) * 8
             node.select = bone.select
             node.has_parent = bone.parent is not None
             node.is_connected_parent = bool(bone.parent and getattr(bone, "use_connect", False))
+            node.layout_locked = lock_state_by_name.get(bone.name, False)
             sync_bone_color_to_node(bone.color, node)
             if bones.active == bone:
                 nodes.active = node
@@ -259,19 +260,25 @@ def rebuild_tree_from_armature(
                 parent_node = nodes.get(bone.parent.name)
                 if parent_node:
                     socket_name = (
-                        BoneNode.CONNECTED_PARENT_SOCKET_NAME
+                        CONNECTED_PARENT_SOCKET_NAME
                         if getattr(bone, "use_connect", False)
-                        else BoneNode.PARENT_SOCKET_NAME
+                        else PARENT_SOCKET_NAME
                     )
                     node_tree.links.new(
-                        parent_node.outputs[BoneNode.CHILD_SOCKET_NAME],
+                        parent_node.outputs[CHILD_SOCKET_NAME],
                         node.inputs[socket_name],
                     )
             else:
                 root_bones.append(bone)
 
     if should_arrange:
-        arrange_nodes(root_bones, nodes)
+        from .layout_controller import restore_locked_tree_layout
+
+        target_bone_names = set(reparented_bone_names or ())
+        if snapshot.node_layout:
+            restore_locked_tree_layout(node_tree, snapshot=snapshot)
+        if target_bone_names:
+            arrange_nodes(root_bones, nodes, target_bone_names=target_bone_names)
     elif snapshot.node_layout:
         from .layout_controller import restore_locked_tree_layout
 
@@ -296,9 +303,8 @@ def reconcile_tree_from_armature(
     bones=None,
     snapshot=None,
     topology_snapshot=None,
+    reparented_bone_names: set[str] | frozenset[str] | None = None,
 ):
-    from ..ui.nodes import BoneNode
-
     if bones is None:
         bones = bone_collection_for_context(context, armature)
     if snapshot is None:
@@ -317,9 +323,10 @@ def reconcile_tree_from_armature(
         for bone in bones:
             node = nodes.get(bone.name)
             if node is None:
-                node = nodes.new(BoneNode.bl_idname)
+                node = nodes.new(BONE_NODE_IDNAME)
                 node.name = bone.name
                 node.width = len(node.name) * 8
+                node.layout_locked = False
             node.select = bone.select
             node.has_parent = bone.parent is not None
             node.is_connected_parent = bool(bone.parent and getattr(bone, "use_connect", False))
@@ -336,9 +343,9 @@ def reconcile_tree_from_armature(
             if bone.parent is None:
                 continue
             socket_name = (
-                BoneNode.CONNECTED_PARENT_SOCKET_NAME
+                CONNECTED_PARENT_SOCKET_NAME
                 if getattr(bone, "use_connect", False)
-                else BoneNode.PARENT_SOCKET_NAME
+                else PARENT_SOCKET_NAME
             )
             expected_links.add((bone.parent.name, bone.name, socket_name))
             expected_socket_by_child[bone.name] = socket_name
@@ -362,7 +369,7 @@ def reconcile_tree_from_armature(
             child_node = nodes.get(child_name)
             if parent_node and child_node:
                 node_tree.links.new(
-                    parent_node.outputs[BoneNode.CHILD_SOCKET_NAME],
+                    parent_node.outputs[CHILD_SOCKET_NAME],
                     child_node.inputs[socket_name],
                 )
 
@@ -378,7 +385,9 @@ def reconcile_tree_from_armature(
 
     if should_arrange:
         root_bones = [bone for bone in bones if bone.parent is None]
-        arrange_nodes(root_bones, nodes)
+        target_bone_names = set(reparented_bone_names or ())
+        if target_bone_names:
+            arrange_nodes(root_bones, nodes, target_bone_names=target_bone_names)
 
     sync_snapshot_from_tree(
         snapshot,
