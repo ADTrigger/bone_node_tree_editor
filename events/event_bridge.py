@@ -8,6 +8,35 @@ from ..core.session import clear_all_tree_sessions
 from ..ui.ui import request_editor_sync
 
 
+def _can_access_blend_data() -> bool:
+    data = getattr(bpy, "data", None)
+    return hasattr(data, "armatures") and hasattr(data, "node_groups")
+
+
+def _run_startup_initialization():
+    if not _can_access_blend_data():
+        return 0.1
+
+    clear_all_tree_sessions()
+    clear_binding_runtime_state()
+    migrate_all_data()
+    mark_all_bound_trees_dirty("binding", "topology", "selection")
+    request_editor_sync()
+    return None
+
+
+def schedule_startup_initialization(*, first_interval: float = 0.0):
+    if bpy.app.timers.is_registered(_run_startup_initialization):
+        return
+
+    bpy.app.timers.register(_run_startup_initialization, first_interval=first_interval)
+
+
+def cancel_startup_initialization():
+    if bpy.app.timers.is_registered(_run_startup_initialization):
+        bpy.app.timers.unregister(_run_startup_initialization)
+
+
 def _iter_updated_armatures(depsgraph):
     armature_flags = {}
     for update in getattr(depsgraph, "updates", ()):
@@ -97,8 +126,6 @@ def register_event_hooks():
     _append_handler(getattr(handlers, "undo_post", None), _on_undo_post)
     _append_handler(getattr(handlers, "redo_post", None), _on_redo_post)
     _append_handler(getattr(handlers, "load_post", None), _on_load_post)
-    mark_all_bound_trees_dirty("binding", "topology", "selection")
-    request_editor_sync()
 
 
 def unregister_event_hooks():

@@ -14,9 +14,13 @@ bl_info = {
 import bpy
 
 from .core.binding import clear_binding_runtime_state
-from .core.migration import migrate_all_data
 from .core.session import clear_all_tree_sessions
-from .events.event_bridge import register_event_hooks, unregister_event_hooks
+from .events.event_bridge import (
+    cancel_startup_initialization,
+    register_event_hooks,
+    schedule_startup_initialization,
+    unregister_event_hooks,
+)
 from .ui.nodes import BoneNodeTree, BoneNode
 from .ui.operators import OT_UpdateBoneNodeTree, OT_SyncBoneNodeSelection
 from .ui.ui import register_ui_hooks, unregister_ui_hooks
@@ -34,12 +38,13 @@ def register():
     clear_all_tree_sessions()
     for cls in classes:
         bpy.utils.register_class(cls)
-    migrate_all_data()
     register_event_hooks()
     register_ui_hooks()
+    schedule_startup_initialization()
 
 
 def unregister():
+    cancel_startup_initialization()
     unregister_ui_hooks()
     unregister_event_hooks()
     clear_all_tree_sessions()
