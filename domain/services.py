@@ -9,7 +9,7 @@ from ..core.blender_context import (
     view_layer_active_object_of,
 )
 from ..core.binding import ensure_bound_tree
-from ..core.constants import TREE_IDNAME
+from ..core.constants import BONE_NODE_HEADER_COLOR, TREE_IDNAME
 
 
 def bone_node_tree_of(context: Context) -> bpy.types.NodeTree | None:
@@ -45,7 +45,8 @@ def armature_of(context: Context) -> Armature | None:
 
 def sync_bone_color_to_node(bone_color: bpy.types.BoneColor, node: Node):
     del bone_color
-    node.use_custom_color = False
+    node.use_custom_color = True
+    node.color = BONE_NODE_HEADER_COLOR
 
 
 def set_bone_select(bone, state: bool):
@@ -58,3 +59,15 @@ def is_in_bone_node_tree(context: Context) -> bool:
     if context.space_data and context.space_data.tree_type == TREE_IDNAME:
         return True
     return False
+
+
+def bone_collection_for_context(context: Context, armature):
+    if context.mode == "EDIT_ARMATURE":
+        return armature.edit_bones
+    return armature.bones
+
+
+def bone_parent_state(bone):
+    if bone is None or bone.parent is None:
+        return None, False
+    return bone.parent.name, bool(getattr(bone, "use_connect", False))

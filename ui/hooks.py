@@ -1,15 +1,16 @@
 import bpy
 from bpy.types import Context
 
-from ..core.constants import EDITOR_SYNC_INTERVAL
+from ..core.constants import EDITOR_SYNC_INTERVAL, EDITOR_USE_POLLING_FALLBACK
 from ..domain.services import is_in_bone_node_tree
 from .editor_registry import clear_all_editor_states, remember_editor_context
 from .editor_sync_loop import (
+    is_ui_hooks_registered,
     poll_active_editor_tree_sync,
     request_editor_sync,
     run_event_driven_editor_sync,
+    set_ui_hooks_registered,
 )
-from .hook_state import is_ui_hooks_registered, set_ui_hooks_registered
 from .operators import OT_SyncBoneNodeSelection, OT_UpdateBoneNodeTree
 
 
@@ -42,7 +43,10 @@ def register_ui_hooks():
     clear_all_editor_states()
     bpy.types.NODE_MT_view_pie.append(_draw_pie)
     bpy.types.NODE_HT_header.append(_draw_header_status)
-    if not bpy.app.timers.is_registered(poll_active_editor_tree_sync):
+    if (
+        EDITOR_USE_POLLING_FALLBACK
+        and not bpy.app.timers.is_registered(poll_active_editor_tree_sync)
+    ):
         bpy.app.timers.register(poll_active_editor_tree_sync, first_interval=EDITOR_SYNC_INTERVAL)
     request_editor_sync()
 
@@ -55,7 +59,7 @@ def unregister_ui_hooks():
     clear_all_editor_states()
     bpy.types.NODE_MT_view_pie.remove(_draw_pie)
     bpy.types.NODE_HT_header.remove(_draw_header_status)
-    if bpy.app.timers.is_registered(poll_active_editor_tree_sync):
+    if EDITOR_USE_POLLING_FALLBACK and bpy.app.timers.is_registered(poll_active_editor_tree_sync):
         bpy.app.timers.unregister(poll_active_editor_tree_sync)
     if bpy.app.timers.is_registered(run_event_driven_editor_sync):
         bpy.app.timers.unregister(run_event_driven_editor_sync)

@@ -2,18 +2,20 @@ import bpy
 from bpy.props import BoolProperty
 from bpy.types import Node, NodeTree
 
-from ..controllers.layout_controller import (
+from ..controllers.topology_controller import (
     capture_node_layout_snapshot,
     restore_locked_node_layout,
     should_capture_layout,
     should_restore_layout,
 )
 from ..core import node_schema
-from ..controllers.sync_controller import apply_node_parent_edit
+from ..controllers.sync_controller import apply_node_parent_edit, mark_bound_tree_dirty
 from ..core.blender_context import current_context, is_edit_armature_mode
 from ..core.binding import get_bound_armature
 from ..core.constants import (
+    BONE_NODE_BODY_COLOR,
     BONE_NODE_ICON,
+    BONE_NODE_HEADER_COLOR,
     BONE_NODE_IDNAME,
     BONE_NODE_LABEL,
     TREE_ICON,
@@ -21,6 +23,7 @@ from ..core.constants import (
     TREE_LABEL,
 )
 from ..core.session import is_tree_mutating
+from .editor_sync_loop import request_editor_sync
 
 
 class BoneNodeTree(NodeTree):
@@ -31,7 +34,11 @@ class BoneNodeTree(NodeTree):
     def update(self):
         if is_tree_mutating(self):
             return
-        return
+        armature = get_bound_armature(self)
+        if armature is None:
+            return
+        mark_bound_tree_dirty(armature, "selection")
+        request_editor_sync()
 
 
 class BoneNode(Node):
@@ -48,11 +55,13 @@ class BoneNode(Node):
 
     def init(self, context):
         del context
-        self.use_custom_color = False
+        self.use_custom_color = True
+        self.color = BONE_NODE_HEADER_COLOR
         parent_socket = self.inputs.new("NodeSocketString", self.PARENT_SOCKET_NAME)
         parent_socket.hide_value = True
         connected_parent_socket = self.inputs.new("NodeSocketString", self.CONNECTED_PARENT_SOCKET_NAME)
         connected_parent_socket.hide_value = True
+        self.outputs.new("NodeSocketString", self.CHILD_SOCKET_NAME)
         spacer_output = self.outputs.new(
             "NodeSocketString",
             "",
@@ -60,16 +69,19 @@ class BoneNode(Node):
         )
         spacer_output.enabled = False
         spacer_output.display_shape = "CIRCLE_DOT"
-        self.outputs.new("NodeSocketString", self.CHILD_SOCKET_NAME)
         self.hide = False
 
     def draw_label(self):
         return self.name
 
-    def draw_buttons(self, context, layout):
-        del context
-        icon = "LOCKED" if self.layout_locked else "UNLOCKED"
-        layout.prop(self, "layout_locked", text="Lock Layout", toggle=True, icon=icon)
+    @classmethod
+    def draw_color_simple(cls):
+        del cls
+        return BONE_NODE_BODY_COLOR
+
+    def draw_color(self, context, node):
+        del self, context, node
+        return BONE_NODE_BODY_COLOR
 
     @classmethod
     def poll(self, node_tree):

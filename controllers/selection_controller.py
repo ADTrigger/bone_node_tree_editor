@@ -1,14 +1,13 @@
 from bpy.types import Context
 
 from ..core.blender_context import set_active_vertex_group_by_name
-from ..core.session import snapshot_for_tree
+from ..core.session import snapshot_for_tree, tree_mutation
 from ..domain.snapshot_collectors import (
     collect_bone_selection_snapshot,
     collect_node_selection_snapshot,
     collect_topology_snapshot,
 )
-from ..domain.services import set_bone_select
-from ..domain.sync_common import bone_collection_for_context
+from ..domain.services import bone_collection_for_context, set_bone_select
 from ..models.diff import diff_selection_state
 from ..models.snapshots import (
     BoneSelectionSnapshot,
@@ -105,19 +104,20 @@ def sync_bone_selection_to_node(
 
     valid_selected_nodes = {node_name for node_name in bone_selected if nodes.get(node_name) is not None}
 
-    for node_name in node_selected - valid_selected_nodes:
-        node = nodes.get(node_name)
-        if node is not None:
-            node.select = False
+    with tree_mutation(node_tree, origin="sync_bone_selection_to_node"):
+        for node_name in node_selected - valid_selected_nodes:
+            node = nodes.get(node_name)
+            if node is not None:
+                node.select = False
 
-    for node_name in valid_selected_nodes - node_selected:
-        node = nodes.get(node_name)
-        if node is not None:
-            node.select = True
+        for node_name in valid_selected_nodes - node_selected:
+            node = nodes.get(node_name)
+            if node is not None:
+                node.select = True
 
-    active_node = nodes.get(bone_active) if bone_active else None
-    if node_active != (active_node.name if active_node else None):
-        nodes.active = active_node
+        active_node = nodes.get(bone_active) if bone_active else None
+        if node_active != (active_node.name if active_node else None):
+            nodes.active = active_node
 
     sync_snapshot(
         snapshot,

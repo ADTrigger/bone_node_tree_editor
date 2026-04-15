@@ -2,20 +2,54 @@ import bpy
 from bpy.types import Context
 
 from ..controllers.sync_controller import mark_bound_tree_dirty, sync_bound_tree
-from ..core.blender_context import current_context, temp_override_context
+from ..core.blender_context import current_context, space_data_of, temp_override_context
+from ..core.binding import ensure_bound_tree, get_bound_tree
 from ..core.constants import EDITOR_EVENT_SYNC_DELAY, EDITOR_SYNC_INTERVAL
 from ..core.session import prune_tree_sessions, session_for_tree
 from ..domain.snapshot_collectors import collect_topology_snapshot
-from ..domain.services import armature_of, is_in_bone_node_tree
-from ..domain.sync_common import bone_collection_for_context
+from ..domain.services import armature_of, bone_collection_for_context, is_in_bone_node_tree
 from ..models.diff import diff_topology_state
-from .editor_binding import active_editor_tree_for_armature
 from .editor_registry import (
     iter_editor_contexts,
     prune_editor_states,
     update_editor_state,
 )
-from .hook_state import is_ui_hooks_registered
+
+
+_ui_hooks_registered = False
+
+
+def is_ui_hooks_registered() -> bool:
+    return _ui_hooks_registered
+
+
+def set_ui_hooks_registered(state: bool):
+    global _ui_hooks_registered
+    _ui_hooks_registered = state
+
+
+def active_editor_tree_for_armature(context: Context, armature):
+    space = space_data_of(context)
+    if space is None or space.type != "NODE_EDITOR":
+        return None
+
+    bound_tree = get_bound_tree(armature)
+    current_tree = getattr(space, "edit_tree", None)
+
+    # Respect pinned editors so we do not override intentionally fixed tree views.
+    if getattr(space, "pin", False):
+        if bound_tree is None or current_tree != bound_tree:
+            return None
+        return bound_tree
+
+    if bound_tree is None:
+        bound_tree = ensure_bound_tree(armature)
+
+    if current_tree != bound_tree:
+        space.node_tree = bound_tree
+        mark_bound_tree_dirty(armature, "binding", "selection")
+
+    return bound_tree
 
 
 def _mark_fallback_sync_if_needed(context: Context, armature, session) -> bool:

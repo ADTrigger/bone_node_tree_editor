@@ -23,7 +23,7 @@ from .events.event_bridge import (
 )
 from .ui.nodes import BoneNodeTree, BoneNode
 from .ui.operators import OT_UpdateBoneNodeTree, OT_SyncBoneNodeSelection
-from .ui.ui import register_ui_hooks, unregister_ui_hooks
+from .ui.hooks import register_ui_hooks, unregister_ui_hooks
 
 
 classes = [
